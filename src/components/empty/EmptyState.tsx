@@ -1,12 +1,13 @@
 import React from 'react';
-import { Gift, Sparkles, Users, Calculator, ArrowRightLeft, ShieldCheck } from 'lucide-react';
+import { Gift, Sparkles, Users, Calculator, ArrowRightLeft, ShieldCheck, FileText } from 'lucide-react';
 
 interface EmptyStateProps {
   onCreatePool: () => void;
   onLoadDemo: () => void;
+  onOpenBrief?: () => void;
 }
 
-export const EmptyState: React.FC<EmptyStateProps> = ({ onCreatePool, onLoadDemo }) => {
+export const EmptyState: React.FC<EmptyStateProps> = ({ onCreatePool, onLoadDemo, onOpenBrief }) => {
   return (
     <div className="max-w-4xl mx-auto px-4 py-16 sm:py-24 text-center">
       {/* Icon Badge */}
@@ -25,7 +26,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onCreatePool, onLoadDemo
       </p>
 
       {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
         <button
           onClick={onCreatePool}
           className="w-full sm:w-auto px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md hover:shadow-lg transition-all focus:outline-none focus:ring-4 focus:ring-indigo-100 flex items-center justify-center gap-2 text-base cursor-pointer"
@@ -42,6 +43,19 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onCreatePool, onLoadDemo
           Load Demo Pool (₹6,000)
         </button>
       </div>
+
+      {/* Prompt Brief link */}
+      {onOpenBrief && (
+        <div className="mb-16">
+          <button
+            onClick={onOpenBrief}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-3.5 py-1.5 rounded-full border border-indigo-100 transition-colors cursor-pointer"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            View Round 2 Assessment Scenario & Brief
+          </button>
+        </div>
+      )}
 
       {/* Value Proposition Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
@@ -82,10 +96,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onCreatePool, onLoadDemo
         </div>
       </div>
 
-      {/* Privacy note */}
+      {/* Persistence note */}
       <div className="mt-12 inline-flex items-center gap-2 text-xs text-slate-400">
         <ShieldCheck className="w-4 h-4 text-emerald-500" />
-        Runs 100% locally in your browser. No sign-up, no backend, data saved securely to localStorage.
+        Runs with embedded SQLite database (`better-sqlite3`) & offline browser fallback.
       </div>
     </div>
   );

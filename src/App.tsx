@@ -4,17 +4,30 @@ import {
   Participant,
   Payment,
   ToastMessage,
-  Pool,
 } from './types';
-import { loadAppState, saveAppState, clearAppState, initialAppState } from './utils/storage';
+import { initialAppState } from './utils/storage';
 import {
   calculateBalances,
   calculatePoolSummary,
-  calculateEqualShare,
 } from './utils/calculations';
 import { calculateSettlements, areAllSettlementsCompleted } from './utils/settlement';
-import { DEMO_APP_STATE } from './data/demoPool';
 import { formatINR } from './utils/currency';
+import {
+  fetchPoolState,
+  createPoolApi,
+  updatePoolApi,
+  addParticipantApi,
+  updateParticipantApi,
+  deleteParticipantApi,
+  addPaymentApi,
+  updatePaymentApi,
+  deletePaymentApi,
+  toggleSettlementApi,
+  resetSettlementsApi,
+  seedDemoPoolApi,
+  resetAllDataApi,
+  checkServerHealth,
+} from './services/api';
 
 // Components
 import { Navbar } from './components/layout/Navbar';
@@ -33,10 +46,13 @@ import { SettlementPanel } from './components/settlement/SettlementPanel';
 import { ConfirmModal } from './components/common/ConfirmModal';
 import { ToastContainer } from './components/common/Toast';
 import { Modal } from './components/common/Modal';
+import { BriefModal } from './components/common/BriefModal';
 
 export const App: React.FC = () => {
   // Main persistent state
-  const [state, setState] = useState<AppState>(() => loadAppState());
+  const [state, setState] = useState<AppState>(initialAppState);
+  const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Modal open states
   const [isCreatePoolOpen, setIsCreatePoolOpen] = useState(false);
@@ -49,6 +65,7 @@ export const App: React.FC = () => {
 
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isBriefModalOpen, setIsBriefModalOpen] = useState(false);
 
   // Toast notifications
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -70,10 +87,18 @@ export const App: React.FC = () => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Sync state to localStorage on changes
+  // Initial load from SQLite backend (with localStorage fallback)
   useEffect(() => {
-    saveAppState(state);
-  }, [state]);
+    async function init() {
+      setIsLoading(true);
+      const isOnline = await checkServerHealth();
+      setIsDbConnected(isOnline);
+      const loadedState = await fetchPoolState();
+      setState(loadedState);
+      setIsLoading(false);
+    }
+    init();
+  }, []);
 
   // Derived calculations
   const balances = useMemo(() => {
@@ -98,53 +123,33 @@ export const App: React.FC = () => {
   }, [state.pool, state.participants, state.payments, allSettlementsDone]);
 
   // Pool handlers
-  const handleCreatePool = (name: string, budget: number) => {
-    const newPool: Pool = {
-      id: `pool-${Date.now()}`,
-      name,
-      targetBudget: budget,
-      currency: 'INR',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    setState({
-      pool: newPool,
-      participants: [],
-      payments: [],
-      completedSettlementIds: [],
-    });
-
-    addToast('Pool Created!', `"${name}" with a budget of ${formatINR(budget)} is ready.`);
+  const handleCreatePool = async (name: string, budget: number) => {
+    const updated = await createPoolApi(name, budget);
+    setState(updated);
+    addToast('Pool Created in SQLite!', `"${name}" with budget ${formatINR(budget)} saved to database.`);
   };
 
-  const handleUpdatePool = (name: string, budget: number) => {
+  const handleUpdatePool = async (name: string, budget: number) => {
     if (!state.pool) return;
-    setState((prev) => ({
-      ...prev,
-      pool: {
-        ...prev.pool!,
-        name,
-        targetBudget: budget,
-        updatedAt: new Date().toISOString(),
-      },
-    }));
-    addToast('Pool Updated', 'Target budget and equal shares have been recalculated.');
+    const updated = await updatePoolApi(state.pool.id, name, budget);
+    setState(updated);
+    addToast('Pool Updated', 'Target budget and equal shares saved to database.');
   };
 
-  const handleLoadDemo = () => {
-    setState(DEMO_APP_STATE);
+  const handleLoadDemo = async () => {
+    const updated = await seedDemoPoolApi();
+    setState(updated);
     addToast(
       'Demo Pool Loaded',
-      'Loaded "Manager Farewell Gift" (₹6,000 budget, 6 members, realistic payments).',
+      'Loaded 6-person demo pool directly into SQLite database (gift_pool.db).',
       'info'
     );
   };
 
-  const handleResetPool = () => {
-    clearAppState();
-    setState(initialAppState);
-    addToast('Data Cleared', 'All pool data and settlements have been reset.', 'info');
+  const handleResetPool = async () => {
+    const updated = await resetAllDataApi();
+    setState(updated);
+    addToast('Database Reset', 'All pool tables wiped in SQLite database.', 'info');
   };
 
   // Participant handlers
@@ -158,49 +163,29 @@ export const App: React.FC = () => {
     setIsParticipantModalOpen(true);
   };
 
-  const handleSaveParticipant = (name: string, participantId?: string) => {
+  const handleSaveParticipant = async (name: string, participantId?: string) => {
     const avatarColors = [
       '#4f46e5', '#059669', '#d97706', '#dc2626',
       '#7c3aed', '#0284c7', '#db2777', '#0891b2',
     ];
 
     if (participantId) {
-      // Edit
-      setState((prev) => ({
-        ...prev,
-        participants: prev.participants.map((p) =>
-          p.id === participantId ? { ...p, name } : p
-        ),
-      }));
-      addToast('Participant Updated', `Updated details for ${name}.`);
+      const updated = await updateParticipantApi(participantId, name);
+      setState(updated);
+      addToast('Participant Updated', `Saved changes for ${name} to SQLite.`);
     } else {
-      // Add
-      const newParticipant: Participant = {
-        id: `part-${Date.now()}`,
-        name,
-        avatarColor: avatarColors[state.participants.length % avatarColors.length],
-        createdAt: new Date().toISOString(),
-      };
-      setState((prev) => ({
-        ...prev,
-        participants: [...prev.participants, newParticipant],
-      }));
-      addToast('Participant Added', `${name} joined the pool. Equal share updated.`);
+      if (!state.pool) return;
+      const color = avatarColors[state.participants.length % avatarColors.length];
+      const updated = await addParticipantApi(state.pool.id, name, color);
+      setState(updated);
+      addToast('Participant Added', `${name} added to database. Equal shares recomputed.`);
     }
   };
 
-  const handleDeleteParticipant = (participantId: string) => {
+  const handleDeleteParticipant = async (participantId: string) => {
     const participant = state.participants.find((p) => p.id === participantId);
-    setState((prev) => ({
-      ...prev,
-      participants: prev.participants.filter((p) => p.id !== participantId),
-      // Clean up payments related to this participant
-      payments: prev.payments.filter(
-        (pay) => pay.payerId !== participantId && pay.beneficiaryId !== participantId
-      ),
-      // Reset settlements since member left
-      completedSettlementIds: [],
-    }));
+    const updated = await deleteParticipantApi(participantId);
+    setState(updated);
     addToast(
       'Participant Removed',
       `Removed ${participant?.name || 'participant'} and adjusted pool shares.`
@@ -218,63 +203,40 @@ export const App: React.FC = () => {
     setIsPaymentModalOpen(true);
   };
 
-  const handleSavePayment = (
+  const handleSavePayment = async (
     paymentData: Omit<Payment, 'id'>,
     editingId?: string
   ) => {
+    if (!state.pool) return;
     if (editingId) {
-      setState((prev) => ({
-        ...prev,
-        payments: prev.payments.map((p) =>
-          p.id === editingId ? { ...paymentData, id: editingId } : p
-        ),
-        completedSettlementIds: [], // Reset checks when financial data changes
-      }));
-      addToast('Payment Updated', `Payment of ${formatINR(paymentData.amount)} updated.`);
+      const updated = await updatePaymentApi(editingId, paymentData);
+      setState(updated);
+      addToast('Payment Updated', `Updated payment of ${formatINR(paymentData.amount)} in database.`);
     } else {
-      const newPayment: Payment = {
-        ...paymentData,
-        id: `pay-${Date.now()}`,
-      };
-      setState((prev) => ({
-        ...prev,
-        payments: [...prev.payments, newPayment],
-        completedSettlementIds: [], // Reset checks when new payment arrives
-      }));
-      addToast('Payment Recorded', `Logged contribution of ${formatINR(paymentData.amount)}.`);
+      const updated = await addPaymentApi(state.pool.id, paymentData);
+      setState(updated);
+      addToast('Payment Recorded', `Logged contribution of ${formatINR(paymentData.amount)} into SQLite.`);
     }
   };
 
-  const handleDeletePayment = (paymentId: string) => {
-    setState((prev) => ({
-      ...prev,
-      payments: prev.payments.filter((p) => p.id !== paymentId),
-      completedSettlementIds: [],
-    }));
-    addToast('Payment Deleted', 'Payment removed and balances updated.');
+  const handleDeletePayment = async (paymentId: string) => {
+    const updated = await deletePaymentApi(paymentId);
+    setState(updated);
+    addToast('Payment Deleted', 'Payment removed from database and balances updated.');
   };
 
   // Settlement handlers
-  const handleToggleSettlement = (transferId: string) => {
-    setState((prev) => {
-      const isCurrentlyCompleted = prev.completedSettlementIds.includes(transferId);
-      const updatedIds = isCurrentlyCompleted
-        ? prev.completedSettlementIds.filter((id) => id !== transferId)
-        : [...prev.completedSettlementIds, transferId];
-
-      return {
-        ...prev,
-        completedSettlementIds: updatedIds,
-      };
-    });
+  const handleToggleSettlement = async (transferId: string) => {
+    if (!state.pool) return;
+    const updated = await toggleSettlementApi(state.pool.id, transferId);
+    setState(updated);
   };
 
-  const handleResetAllSettlements = () => {
-    setState((prev) => ({
-      ...prev,
-      completedSettlementIds: [],
-    }));
-    addToast('Settlement Checks Reset', 'All transfers marked as pending again.', 'info');
+  const handleResetAllSettlements = async () => {
+    if (!state.pool) return;
+    const updated = await resetSettlementsApi(state.pool.id);
+    setState(updated);
+    addToast('Settlement Checks Reset', 'All transfers marked as pending in SQLite.', 'info');
   };
 
   // Share summary generator
@@ -310,16 +272,29 @@ export const App: React.FC = () => {
     return text;
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm font-medium text-slate-600">Connecting to database...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
       {/* Navigation Header */}
       <Navbar
         pool={state.pool}
         summary={summary}
+        isDbConnected={isDbConnected}
         onEditPool={() => setIsEditPoolOpen(true)}
         onResetPool={() => setIsResetConfirmOpen(true)}
         onLoadDemo={handleLoadDemo}
         onShareSummary={() => setIsShareModalOpen(true)}
+        onOpenBrief={() => setIsBriefModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -328,6 +303,7 @@ export const App: React.FC = () => {
           <EmptyState
             onCreatePool={() => setIsCreatePoolOpen(true)}
             onLoadDemo={handleLoadDemo}
+            onOpenBrief={() => setIsBriefModalOpen(true)}
           />
         ) : (
           <div className="space-y-8">
@@ -416,7 +392,7 @@ export const App: React.FC = () => {
         onClose={() => setIsResetConfirmOpen(false)}
         onConfirm={handleResetPool}
         title="Reset Entire Pool?"
-        message="This will permanently delete the current pool, all participants, payments, and settlement progress from your browser. Are you sure?"
+        message="This will permanently delete the current pool, all participants, payments, and settlement progress from the SQLite database. Are you sure?"
         confirmLabel="Reset Everything"
         isDestructive={true}
       />
@@ -449,6 +425,13 @@ export const App: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Assessment Brief Modal */}
+      <BriefModal
+        isOpen={isBriefModalOpen}
+        onClose={() => setIsBriefModalOpen(false)}
+        onLoadDemo={handleLoadDemo}
+      />
 
       {/* Toasts */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
